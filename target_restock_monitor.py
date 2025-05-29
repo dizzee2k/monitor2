@@ -18,8 +18,8 @@ PRODUCTS = {
     "Prismatic Bundle": "https://www.target.com/p/pok--233-mon-trading-card-game--scarlet---38--violet--8212-prismatic-evolutions-booster-bundle--no-aasa/-/A-93954446",
     "Prismatic SPC": "https://www.target.com/p/pok--233-mon-trading-card-game--scarlet---38--violet--8212-prismatic-evolutions-super-premium-collection--no-aasa/-/A-94300072",
     "Prismatic Binder": "https://www.target.com/p/pok--233-mon-trading-card-game--scarlet---38--violet--8212-prismatic-evolutions-binder-collection--no-aasa/-/A-94300066",
-    "DR Bundle": "https://www.target.com/p/pok--233-mon-trading-card-game--scarlet---38--violet--8212--destined-rivals-booster-bundle--no-aasa/-/A-94300067"
-    "Crown Zenith Bundle": "https://www.target.com/p/pok--233-mon-trading-card-game--crown-zenith-booster-bundle-box--no-aasa/-/A-94091405"
+    "DR Bundle": "https://www.target.com/p/pok--233-mon-trading-card-game--scarlet---38--violet--8212--destined-rivals-booster-bundle--no-aasa/-/A-94300067",
+    "Crown Zenith Bundle": "https://www.target.com/p/pok--233-mon-trading-card-game--crown-zenith-booster-bundle-box--no-aasa/-/A-94091405",
     "Lego Minecraft": "https://www.target.com/p/lego-minecraft-the-lush-cave-fight-building-toy-30705/-/A-93104070#lnk=sametab",
     "April 2025 Zard Box": "https://www.target.com/p/2025-pokemon-april-special-collectible-trading-cards/-/A-94411686?preselect=94411686",
     "SV 3.5 151 Booster Bundle Box": "https://www.target.com/p/pokemon-scarlet-violet-s3-5-booster-bundle-box/-/A-88897904?preselect=88897904"
