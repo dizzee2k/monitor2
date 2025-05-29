@@ -30,12 +30,11 @@ PRODUCTS = {
 # Otherwise, it will use the environment variable (good for Heroku)
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-CHECK_INTERVAL = 30  # Every 30 seconds
+CHECK_INTERVAL = 30  # Check every 30 seconds
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
 
-# Track which items we've already alerted on (avoid spam)
 alerted_items = set()
 
 def get_tcin_from_url(url_string):
@@ -43,9 +42,8 @@ def get_tcin_from_url(url_string):
     try:
         path_segments = urlparse(url_string).path.strip("/").split("/")
         for segment in reversed(path_segments):
-            # Target TCINs are usually prefixed with "A-" in the URL
             if segment.startswith("A-") and len(segment) > 2 and segment[2:].isdigit():
-                return segment[2:] # Return only the numerical part
+                return segment[2:]
     except Exception as e:
         print(f"DEBUG: Error extracting TCIN from URL {url_string}: {e}")
     return None
@@ -66,62 +64,44 @@ def is_in_stock(url):
 
         # --- Save HTML for debugging (can be commented out once stable) ---
         try:
-            parsed_url = urlparse(url)
-            path_part = parsed_url.path.strip("/")
-            product_id_for_filename = tcin # Use the extracted TCIN for a cleaner filename part
-            
-            # Sanitize the segment to make it a valid filename component
+            product_id_for_filename = tcin 
             safe_product_id_part = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in product_id_for_filename)
-            filename = f"debug_target_page_A-{safe_product_id_part}.html" # Prepend A- for consistency
-            
+            filename = f"debug_target_page_A-{safe_product_id_part}.html"
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(soup.prettify())
-            print(f"DEBUG: Full HTML content saved to: {filename}")
+            # print(f"DEBUG: Full HTML content saved to: {filename}") # Less verbose logging
         except Exception as e:
             print(f"DEBUG: Could not save HTML to file for {url}: {e}")
         # --- End Save HTML ---
 
         script_tag = soup.find("script", string=lambda t: t and "__TGT_DATA__" in t)
-        if not script_tag:
-            print(f"DEBUG: __TGT_DATA__ script tag not found for {url}. Marking as OOS.")
+        if not script_tag or not script_tag.string:
+            print(f"DEBUG: __TGT_DATA__ script tag not found or empty for {url}. Marking as OOS.")
             return False
 
+        content = script_tag.string
         json_str = None
-        if script_tag.string:
-            content = script_tag.string
-            # Corrected Regex: Looks for '__TGT_DATA__' (as a string literal) and then the JSON.parse call
-            # This regex captures the string argument passed to JSON.parse()
-            match = re.search(
-                r"['\"]__TGT_DATA__['\"]\s*:\s*\{\s*configurable:\s*false,\s*enumerable:\s*true,\s*value:\s*deepFreeze\(JSON\.parse\((.*?)\)\),\s*writable:\s*false\s*\}",
-                content,
-                re.DOTALL
-            )
-            if match:
-                json_arg_str = match.group(1).strip() # This is the argument to JSON.parse(), e.g., "\"{\\\"foo\\\": ...}\""
-                
-                # Remove outer quotes of the string literal and unescape
-                if json_arg_str.startswith('"') and json_arg_str.endswith('"'):
-                    json_str = json_arg_str[1:-1]
-                elif json_arg_str.startswith("'") and json_arg_str.endswith("'"): # Handle single quotes too
-                    json_str = json_arg_str[1:-1]
-                else:
-                    print(f"DEBUG: Captured JSON argument for __TGT_DATA__ is not correctly quoted: {json_arg_str[:100]}...")
-                    return False # Cannot proceed if not properly quoted
-
+        match = re.search(
+            r"['\"]__TGT_DATA__['\"]\s*:\s*\{\s*configurable:\s*false,\s*enumerable:\s*true,\s*value:\s*deepFreeze\(JSON\.parse\((.*?)\)\),\s*writable:\s*false\s*\}",
+            content,
+            re.DOTALL
+        )
+        if match:
+            json_arg_str = match.group(1).strip()
+            if (json_arg_str.startswith('"') and json_arg_str.endswith('"')) or \
+               (json_arg_str.startswith("'") and json_arg_str.endswith("'")):
+                json_str = json_arg_str[1:-1]
                 try:
-                    # Python's json.loads can often handle strings with escaped characters directly
-                    # if they are standard JSON escapes. The encode/decode unicode_escape is more robust.
                     json_str = json_str.encode('latin-1', 'backslashreplace').decode('unicode-escape')
                 except Exception as e:
                     print(f"DEBUG: Error during unicode_escape of JSON string for {url}: {e}")
                     return False
             else:
-                print(f"DEBUG: Could not regex parse the JSON block from __TGT_DATA__ for {url}.")
-                # If regex fails, print a snippet of the script tag for manual inspection
-                tgt_data_idx = content.find("'__TGT_DATA__'")
-                if tgt_data_idx != -1:
-                    print(f"DEBUG: Snippet around __TGT_DATA__ for {url}:\n{content[max(0, tgt_data_idx-100) : tgt_data_idx+400]}")
+                print(f"DEBUG: Captured JSON argument for __TGT_DATA__ is not correctly quoted: {json_arg_str[:100]}...")
                 return False
+        else:
+            print(f"DEBUG: Could not regex parse the JSON block from __TGT_DATA__ for {url}.")
+            return False
         
         if not json_str:
             print(f"DEBUG: Could not extract JSON string from __TGT_DATA__ for {url}. Marking as OOS.")
@@ -130,11 +110,10 @@ def is_in_stock(url):
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
-            print(f"DEBUG: Failed to decode JSON from __TGT_DATA__ for {url}: {e}")
-            print(f"DEBUG: JSON string snippet that failed (first 1000 chars): {json_str[:1000]}")
+            print(f"DEBUG: Failed to decode JSON from __TGT_DATA__ for {url}: {e}. Snippet: {json_str[:1000]}")
             return False
 
-        product_data = None
+        product_data_from_json = None
         if data.get("__PRELOADED_QUERIES__") and data["__PRELOADED_QUERIES__"].get("queries"):
             for query_entry in data["__PRELOADED_QUERIES__"]["queries"]:
                 if isinstance(query_entry, list) and len(query_entry) == 2:
@@ -143,44 +122,61 @@ def is_in_stock(url):
                         query_name, query_params = query_details[0], query_details[1]
                         if query_name == "@web/domain-product/get-pdp-v1" and isinstance(query_params, dict) and query_params.get("tcin") == tcin:
                             if query_result and query_result.get("data") and query_result["data"].get("product"):
-                                product_data = query_result["data"]["product"]
+                                product_data_from_json = query_result["data"]["product"]
                                 break
         
-        if not product_data:
+        if not product_data_from_json:
             print(f"DEBUG: Product data for TCIN {tcin} not found in __TGT_DATA__ JSON for {url}. Marking as OOS.")
             return False
 
+        # --- Debug prints for the specific product data ---
+        # print(f"DEBUG JSON for TCIN {tcin}: {json.dumps(product_data_from_json, indent=2)}") # Can be very verbose
+
         # Check for pre-order street date
-        street_date_str = product_data.get("item", {}).get("mmbv_content", {}).get("street_date")
+        street_date_str = product_data_from_json.get("item", {}).get("mmbv_content", {}).get("street_date")
         if street_date_str:
             try:
                 street_date = datetime.strptime(street_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 current_date = datetime.now(timezone.utc)
                 if street_date > current_date:
-                    print(f"DEBUG: Item {tcin} is a pre-order (Street Date: {street_date_str}). Marking as OOS for now.")
+                    print(f"DEBUG: Item {tcin} is a pre-order (Street Date: {street_date_str}). Marking as OOS for shipping.")
                     return False
             except ValueError:
                 print(f"DEBUG: Could not parse street_date: {street_date_str} for {tcin}")
 
-        # Check eligibility rules for different fulfillment methods
-        eligibility_rules = product_data.get("item", {}).get("eligibility_rules", {})
-        
-        ship_to_guest_active = eligibility_rules.get("ship_to_guest", {}).get("is_active", False)
-        if ship_to_guest_active:
-            print(f"DEBUG: Item {tcin} IS ELIGIBLE for ship_to_guest. Marking as IN STOCK.")
-            return True
+        # Check overall product purchasability
+        if product_data_from_json.get("purchasable") is False: # Explicitly False
+            print(f"DEBUG: Item {tcin} 'purchasable' flag is False in JSON. Marking as OOS for shipping.")
+            return False
 
-        opu_active = eligibility_rules.get("hold", {}).get("is_active", False) # 'hold' often means Order Pickup
-        if opu_active:
-            print(f"DEBUG: Item {tcin} IS ELIGIBLE for Order Pickup (hold.is_active). Marking as IN STOCK.")
+        # Focus ONLY on shipping availability
+        # Path to shipping options can vary, common ones are:
+        # product.fulfillment.shipping_options.availability_status
+        # product.item.fulfillment.shipping_options.availability_status
+        
+        shipping_options = {}
+        if "fulfillment" in product_data_from_json: # Common top-level fulfillment
+            shipping_options = product_data_from_json.get("fulfillment", {}).get("shipping_options", {})
+        elif "item" in product_data_from_json and "fulfillment" in product_data_from_json["item"]: # Nested under item
+             shipping_options = product_data_from_json.get("item", {}).get("fulfillment", {}).get("shipping_options", {})
+        
+        shipping_status = shipping_options.get("availability_status", "UNKNOWN").upper() # Default to UNKNOWN if not found
+        
+        # General eligibility for shipping (broader check)
+        ship_to_guest_eligible = product_data_from_json.get("item", {}).get("eligibility_rules", {}).get("ship_to_guest", {}).get("is_active", False)
+
+        print(f"DEBUG: For TCIN {tcin} - Specific Shipping Status: '{shipping_status}', General Ship-to-Guest Eligible: {ship_to_guest_eligible}")
+
+        # Primary condition for being IN STOCK for shipping:
+        if shipping_status == "IN_STOCK" or shipping_status == "PREORDER_SELLABLE":
+            # PREORDER_SELLABLE means it can be ordered for shipping, even if it's a pre-order that passed the street_date check.
+            print(f"DEBUG: Item {tcin} specific shipping_status is '{shipping_status}'. Marking as IN STOCK for shipping.")
             return True
-            
-        sdd_active = eligibility_rules.get("scheduled_delivery", {}).get("is_active", False) # Same Day Delivery
-        if sdd_active:
-            print(f"DEBUG: Item {tcin} IS ELIGIBLE for Scheduled Delivery. Marking as IN STOCK.")
-            return True
-            
-        print(f"DEBUG: No clear IN_STOCK indicators in JSON eligibility_rules for TCIN {tcin}. ship_to_guest: {ship_to_guest_active}, opu_active (hold): {opu_active}, sdd_active: {sdd_active}. Marking as OOS.")
+        
+        # If specific shipping_status is not definitively "IN_STOCK" or "PREORDER_SELLABLE",
+        # then consider it out of stock for shipping.
+        # We are NOT falling back to ship_to_guest_eligible alone if shipping_status is present but not favorable.
+        print(f"DEBUG: Item {tcin} specific shipping_status is '{shipping_status}' (not IN_STOCK/PREORDER_SELLABLE). Marking as OOS for shipping.")
         return False
 
     except requests.exceptions.RequestException as e:
@@ -188,9 +184,8 @@ def is_in_stock(url):
         return False
     except Exception as e:
         print(f"An unexpected error occurred in is_in_stock for {url}: {e}")
-        # For more detailed error info during development:
-        # import traceback
-        # traceback.print_exc()
+        import traceback
+        traceback.print_exc() 
         return False
 
 def send_discord_alert(product_name, url):
@@ -238,7 +233,7 @@ def main():
             except Exception as e:
                 print(f"⚠️ An unexpected error occurred in main loop for {name}: {e}")
             
-            time.sleep(3) # Slightly increased delay between product checks
+            time.sleep(3) 
 
         print(f"--- Loop finished, sleeping for {CHECK_INTERVAL} seconds ---")
         time.sleep(CHECK_INTERVAL)
