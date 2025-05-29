@@ -26,11 +26,14 @@ def is_in_stock(url):
         add_to_cart = soup.find("button", {"data-test": "addToCartButton"})
         out_of_stock = soup.find("div", {"data-test": "notAvailableMessage"})
         
-        # Check if the "Add to cart" button is disabled
+        # Log details for debugging
+        print(f"Add to cart button: {add_to_cart}")
+        print(f"Out of stock message element: {out_of_stock}")
+        
         is_button_enabled = add_to_cart is not None and "disabled" not in add_to_cart.attrs
-        # Check if out-of-stock message exists and contains "out of stock"
         is_out_of_stock = out_of_stock is not None and "out of stock" in out_of_stock.text.lower()
         
+        print(f"Button enabled: {is_button_enabled}, Out of stock message: {is_out_of_stock}")
         return is_button_enabled and not is_out_of_stock
     except Exception as e:
         print(f"Error checking {url}: {e}")
