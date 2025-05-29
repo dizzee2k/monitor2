@@ -21,17 +21,42 @@ alerted_items = set()
 
 def is_in_stock(url):
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-        add_to_cart = soup.find("button", {"data-test": "addToCartButton"})
-        out_of_stock = soup.find("div", {"data-test": "notAvailableMessage"})
+        # Set up Chrome options for headless browsing
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.binary_location = "/app/.apt/usr/bin/google-chrome"
+
+        # Set up ChromeDriver
+        service = Service("/app/.chromedriver/bin/chromedriver")
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        # Load the page and wait for JavaScript to render
+        driver.get(url)
+        time.sleep(3)  # Wait for dynamic content to load
+        
+        # Parse the rendered page with BeautifulSoup
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        driver.quit()
+        
+        # Find "Add to cart" button using id containing "addToCartButton"
+        add_to_cart = soup.find("button", id=lambda x: x and "addToCartButton" in x)
+        # Find "Out of stock" message by searching for a div with "out of stock" text
+        out_of_stock = None
+        for div in soup.find_all("div"):
+            if div.text and "out of stock" in div.text.lower():
+                out_of_stock = div
+                break
         
         # Log details for debugging
-        print(f"Add to cart button: {add_to_cart}")
-        print(f"Out of stock message element: {out_of_stock}")
+        print(f"URL: {url}")
+        print(f"Add to cart button: {add_to_cart.prettify() if add_to_cart else 'None'}")
+        print(f"Out of stock message element: {out_of_stock.prettify() if out_of_stock else 'None'}")
         
         is_button_enabled = add_to_cart is not None and "disabled" not in add_to_cart.attrs
-        is_out_of_stock = out_of_stock is not None and "out of stock" in out_of_stock.text.lower()
+        is_out_of_stock = out_of_stock is not None
         
         print(f"Button enabled: {is_button_enabled}, Out of stock message: {is_out_of_stock}")
         return is_button_enabled and not is_out_of_stock
