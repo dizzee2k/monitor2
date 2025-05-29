@@ -10,7 +10,7 @@ PRODUCTS = {
     "SV 3.5 Booster Bundle Box": "https://www.target.com/p/pokemon-scarlet-violet-s3-5-booster-bundle-box/-/A-88897904?preselect=88897904"
 }
 import os
-DISCORD_WEBHOOK_URL = os.environ.get("https://discord.com/api/webhooks/1377565409020219433/QKtODI2sxXxenbTjjtsLKQCAd6zUfW-sMeoYWDuBNItMZ0p-z8lIZDJ4dR0GrC861xdo")
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 CHECK_INTERVAL = 300  # Every 5 minutes
 HEADERS = {
     "User-Agent": "Mozilla/5.0"
