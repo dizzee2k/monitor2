@@ -25,20 +25,14 @@ PRODUCTS = {
     "SV 3.5 151 Booster Bundle Box": "https://www.target.com/p/pokemon-scarlet-violet-s3-5-booster-bundle-box/-/A-88897904?preselect=88897904"
 }
 
-# For local testing, you can temporarily hardcode your webhook URL:
-# DISCORD_WEBHOOK_URL = "YOUR_ACTUAL_DISCORD_WEBHOOK_URL_GOES_HERE"
-# Otherwise, it will use the environment variable (good for Heroku)
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-
-CHECK_INTERVAL = 30  # Check every 30 seconds
+CHECK_INTERVAL = 30
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
-
 alerted_items = set()
 
 def get_tcin_from_url(url_string):
-    """Extracts the TCIN (product ID, numbers only) from a Target URL."""
     try:
         path_segments = urlparse(url_string).path.strip("/").split("/")
         for segment in reversed(path_segments):
@@ -53,7 +47,6 @@ def is_in_stock(url):
     if not tcin:
         print(f"DEBUG: Could not extract TCIN for URL: {url}. Marking as OOS.")
         return False
-    
     print(f"DEBUG: Extracted TCIN {tcin} for URL {url}")
 
     try:
@@ -62,17 +55,14 @@ def is_in_stock(url):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # --- Save HTML for debugging (can be commented out once stable) ---
         try:
-            product_id_for_filename = tcin 
+            product_id_for_filename = tcin
             safe_product_id_part = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in product_id_for_filename)
             filename = f"debug_target_page_A-{safe_product_id_part}.html"
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(soup.prettify())
-            # print(f"DEBUG: Full HTML content saved to: {filename}") # Less verbose logging
         except Exception as e:
             print(f"DEBUG: Could not save HTML to file for {url}: {e}")
-        # --- End Save HTML ---
 
         script_tag = soup.find("script", string=lambda t: t and "__TGT_DATA__" in t)
         if not script_tag or not script_tag.string:
@@ -83,8 +73,7 @@ def is_in_stock(url):
         json_str = None
         match = re.search(
             r"['\"]__TGT_DATA__['\"]\s*:\s*\{\s*configurable:\s*false,\s*enumerable:\s*true,\s*value:\s*deepFreeze\(JSON\.parse\((.*?)\)\),\s*writable:\s*false\s*\}",
-            content,
-            re.DOTALL
+            content, re.DOTALL
         )
         if match:
             json_arg_str = match.group(1).strip()
@@ -129,10 +118,6 @@ def is_in_stock(url):
             print(f"DEBUG: Product data for TCIN {tcin} not found in __TGT_DATA__ JSON for {url}. Marking as OOS.")
             return False
 
-        # --- Debug prints for the specific product data ---
-        # print(f"DEBUG JSON for TCIN {tcin}: {json.dumps(product_data_from_json, indent=2)}") # Can be very verbose
-
-        # Check for pre-order street date
         street_date_str = product_data_from_json.get("item", {}).get("mmbv_content", {}).get("street_date")
         if street_date_str:
             try:
@@ -144,39 +129,34 @@ def is_in_stock(url):
             except ValueError:
                 print(f"DEBUG: Could not parse street_date: {street_date_str} for {tcin}")
 
-        # Check overall product purchasability
-        if product_data_from_json.get("purchasable") is False: # Explicitly False
+        if product_data_from_json.get("purchasable") is False:
             print(f"DEBUG: Item {tcin} 'purchasable' flag is False in JSON. Marking as OOS for shipping.")
             return False
 
-        # Focus ONLY on shipping availability
-        # Path to shipping options can vary, common ones are:
-        # product.fulfillment.shipping_options.availability_status
-        # product.item.fulfillment.shipping_options.availability_status
+        shipping_options_data = {}
+        if "fulfillment" in product_data_from_json and "shipping_options" in product_data_from_json["fulfillment"]:
+            shipping_options_data = product_data_from_json["fulfillment"]["shipping_options"]
+        elif "item" in product_data_from_json and "fulfillment" in product_data_from_json["item"] and \
+             "shipping_options" in product_data_from_json["item"]["fulfillment"]:
+            shipping_options_data = product_data_from_json["item"]["fulfillment"]["shipping_options"]
         
-        shipping_options = {}
-        if "fulfillment" in product_data_from_json: # Common top-level fulfillment
-            shipping_options = product_data_from_json.get("fulfillment", {}).get("shipping_options", {})
-        elif "item" in product_data_from_json and "fulfillment" in product_data_from_json["item"]: # Nested under item
-             shipping_options = product_data_from_json.get("item", {}).get("fulfillment", {}).get("shipping_options", {})
-        
-        shipping_status = shipping_options.get("availability_status", "UNKNOWN").upper() # Default to UNKNOWN if not found
-        
-        # General eligibility for shipping (broader check)
+        specific_shipping_status = shipping_options_data.get("availability_status", "UNKNOWN").upper()
         ship_to_guest_eligible = product_data_from_json.get("item", {}).get("eligibility_rules", {}).get("ship_to_guest", {}).get("is_active", False)
 
-        print(f"DEBUG: For TCIN {tcin} - Specific Shipping Status: '{shipping_status}', General Ship-to-Guest Eligible: {ship_to_guest_eligible}")
+        print(f"DEBUG: For TCIN {tcin} - Specific Shipping Status: '{specific_shipping_status}', General Ship-to-Guest Eligible: {ship_to_guest_eligible}")
 
-        # Primary condition for being IN STOCK for shipping:
-        if shipping_status == "IN_STOCK" or shipping_status == "PREORDER_SELLABLE":
-            # PREORDER_SELLABLE means it can be ordered for shipping, even if it's a pre-order that passed the street_date check.
-            print(f"DEBUG: Item {tcin} specific shipping_status is '{shipping_status}'. Marking as IN STOCK for shipping.")
+        # Condition 1: Explicitly in stock via specific shipping status
+        if specific_shipping_status == "IN_STOCK" or specific_shipping_status == "PREORDER_SELLABLE":
+            print(f"DEBUG: Item {tcin} specific shipping_status is '{specific_shipping_status}'. Marking as IN STOCK for shipping.")
             return True
         
-        # If specific shipping_status is not definitively "IN_STOCK" or "PREORDER_SELLABLE",
-        # then consider it out of stock for shipping.
-        # We are NOT falling back to ship_to_guest_eligible alone if shipping_status is present but not favorable.
-        print(f"DEBUG: Item {tcin} specific shipping_status is '{shipping_status}' (not IN_STOCK/PREORDER_SELLABLE). Marking as OOS for shipping.")
+        # Condition 2: Specific status is UNKNOWN (or not explicitly OOS), but general shipping eligibility is true
+        # This handles cases where `availability_status` isn't "IN_STOCK" but the item is still shippable.
+        if specific_shipping_status in ["UNKNOWN", ""] and ship_to_guest_eligible:
+            print(f"DEBUG: Item {tcin} specific shipping_status is '{specific_shipping_status}' but ship_to_guest_eligible is True. Marking as IN STOCK for shipping.")
+            return True
+            
+        print(f"DEBUG: Item {tcin} (shipping_status: '{specific_shipping_status}', ship_eligible: {ship_to_guest_eligible}) does not meet IN STOCK criteria for shipping. Marking as OOS.")
         return False
 
     except requests.exceptions.RequestException as e:
