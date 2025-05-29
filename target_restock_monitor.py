@@ -6,6 +6,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 import os
+import requests
 
 # === CONFIG ===
 PRODUCTS = {
@@ -17,12 +18,16 @@ PRODUCTS = {
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 CHECK_INTERVAL = 300  # Every 5 minutes
 
-# Set up Selenium WebDriver
+# Set up Selenium WebDriver for Heroku
 chrome_options = Options()
 chrome_options.add_argument("--headless")  # Run in headless mode (no GUI)
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
-service = Service('/path/to/chromedriver')  # Replace with your ChromeDriver path
+chrome_options.add_argument("--disable-gpu")
+chrome_options.binary_location = "/app/.apt/usr/lib/chromium-browser/chrome"  # Path to Chrome on Heroku
+
+# Path to ChromeDriver installed by the buildpack
+service = Service("/app/.chromedriver/bin/chromedriver")
 driver = webdriver.Chrome(service=service, options=chrome_options)
 
 # Track which items we've already alerted on (avoid spam)
@@ -38,12 +43,12 @@ def is_in_stock(url):
         add_to_cart = driver.find_elements(By.XPATH, "//button[contains(text(), 'Add to cart')]")
         qty_1 = driver.find_elements(By.XPATH, "//span[contains(text(), 'Qty 1')]")
         out_of_stock = driver.find_elements(By.XPATH, "//*[contains(text(), 'Out of stock')]")
-        return len(add_to_cart) > 0 or len(qty_1) > 0 and len(out_of_stock) == 0
+        return (len(add_to_cart) > 0 or len(qty_1) > 0) and len(out_of_stock) == 0
     except Exception as e:
         print(f"Error checking {url}: {e}")
         return False
     finally:
-        # Optional: Add a small delay to avoid overwhelming the site
+        # Add a small delay to avoid overwhelming the site
         time.sleep(2)
 
 def send_discord_alert(product_name, url):
