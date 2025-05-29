@@ -24,8 +24,8 @@ def is_in_stock(url):
         response = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         page_text = soup.get_text()
-        # Example: Look for "Add to Cart" button
-        add_to_cart = soup.find("button", text="Buy now")
+        # Example: Look for "Buy now" button
+        buy_now = soup.find("button", text="Buy now")
         out_of_stock = soup.find("div", class_="styles__AvailabilityMessage")
         return "Out of stock" not in page_text and ("Buy now" in page_text or "Qty 1" in page_text)
     except Exception as e:
