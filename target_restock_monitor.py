@@ -24,7 +24,7 @@ def is_in_stock(url):
         response = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         page_text = soup.get_text()
-        return "Out of stock" not in page_text and ("Add to cart" in page_text or "Ship it" in page_text)
+        return "Out of stock" not in page_text and ("Buy now" in page_text or "Qty 1" in page_text)
     except Exception as e:
         print(f"Error checking {url}: {e}")
         return False
