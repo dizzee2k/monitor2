@@ -23,11 +23,15 @@ def is_in_stock(url):
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
-        page_text = soup.get_text()
-        # Example: Look for "Buy now" button
-        buy_now = soup.find("button", text="Buy now")
-        out_of_stock = soup.find("div", class_="styles__AvailabilityMessage")
-        return "Out of stock" not in page_text and ("Buy now" in page_text or "Qty 1" in page_text)
+        add_to_cart = soup.find("button", {"data-test": "addToCartButton"})
+        out_of_stock = soup.find("div", {"data-test": "notAvailableMessage"})
+        
+        # Check if the "Add to cart" button is disabled
+        is_button_enabled = add_to_cart is not None and "disabled" not in add_to_cart.attrs
+        # Check if out-of-stock message exists and contains "out of stock"
+        is_out_of_stock = out_of_stock is not None and "out of stock" in out_of_stock.text.lower()
+        
+        return is_button_enabled and not is_out_of_stock
     except Exception as e:
         print(f"Error checking {url}: {e}")
         return False
