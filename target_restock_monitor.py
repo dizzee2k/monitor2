@@ -18,16 +18,16 @@ PRODUCTS = {
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 CHECK_INTERVAL = 300  # Every 5 minutes
 
-# Set up Selenium WebDriver for Heroku
+# Set up Selenium WebDriver for Heroku with Chrome for Testing
 chrome_options = Options()
 chrome_options.add_argument("--headless")  # Run in headless mode (no GUI)
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-gpu")
-chrome_options.binary_location = "/app/.apt/usr/lib/chromium-browser/chrome"  # Path to Chrome on Heroku
+chrome_options.binary_location = "/usr/bin/google-chrome"  # Path to Chrome from Chrome for Testing
 
-# Path to ChromeDriver installed by the buildpack
-service = Service("/app/.chromedriver/bin/chromedriver")
+# Path to ChromeDriver from Chrome for Testing
+service = Service("/usr/local/bin/chromedriver")
 driver = webdriver.Chrome(service=service, options=chrome_options)
 
 # Track which items we've already alerted on (avoid spam)
