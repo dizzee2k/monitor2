@@ -22,19 +22,32 @@ alerted_items = set()
 def is_in_stock(url):
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
+        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
         soup = BeautifulSoup(response.text, "html.parser")
+
         add_to_cart = soup.find("button", {"data-test": "addToCartButton"})
         out_of_stock = soup.find("div", {"data-test": "notAvailableMessage"})
-        
+
         # Log details for debugging
         print(f"Add to cart button: {add_to_cart}")
         print(f"Out of stock message element: {out_of_stock}")
-        
-        is_button_enabled = add_to_cart is not None and "disabled" not in add_to_cart.attrs
-        is_out_of_stock = out_of_stock is not None and "out of stock" in out_of_stock.text.lower()
-        
-        print(f"Button enabled: {is_button_enabled}, Out of stock message: {is_out_of_stock}")
-        return is_button_enabled and not is_out_of_stock
+
+        is_button_disabled = False
+        if add_to_cart:
+            is_button_disabled = add_to_cart.has_attr('disabled') or 'disabled' in add_to_cart.get('class', [])
+        else:
+            print("Add to cart button not found.")
+            return False # If add to cart button is not found, assume it is out of stock
+
+        is_out_of_stock = out_of_stock is not None
+
+        print(f"Button disabled: {is_button_disabled}, Out of stock message: {is_out_of_stock}")
+
+        return not is_button_disabled and not is_out_of_stock
+
+    except requests.exceptions.RequestException as e:
+        print(f"HTTP Error checking {url}: {e}")
+        return False
     except Exception as e:
         print(f"Error checking {url}: {e}")
         return False
