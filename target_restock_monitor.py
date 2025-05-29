@@ -24,34 +24,40 @@ alerted_items = set()
 def is_in_stock(url):
     """
     Checks if a product is in stock by looking for specific HTML elements and attributes.
-    Focuses on the 'data-test="shippingButton"' as per user finding.
+    Includes printing HTML for debugging selectors.
     """
     try:
+        print(f"DEBUG: Fetching URL: {url}")
         response = requests.get(url, headers=HEADERS, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # print(f"DEBUG: Checking {url}, page title: {soup.title.string if soup.title else 'No title'}")
+        # --- PRINT HTML FOR DEBUGGING ---
+        print(f"--- HTML START for {url} (first 5000 chars) ---")
+        print(soup.prettify()[:5000]) # Print the first 5000 characters of the prettified HTML
+        print(f"--- HTML END for {url} ---")
+        # --- END PRINT HTML ---
 
         # 1. Check for explicit "Out of Stock" blocks first.
-        # !!! USER ACTION: Verify this selector by inspecting an OOS page on Target !!!
-        sold_out_block_selector = {"data-test": "soldOutBlock"} # Example selector
+        # !!! USER ACTION: Verify this selector by inspecting the HTML printed above !!!
+        sold_out_block_selector = {"data-test": "soldOutBlock"}
         sold_out_block = soup.find(attrs=sold_out_block_selector)
         if sold_out_block:
+            print(f"DEBUG: Found element matching potential OOS selector {sold_out_block_selector}.")
             sold_out_text = sold_out_block.get_text(strip=True).lower()
             if "out of stock" in sold_out_text or "sold out" in sold_out_text or "unavailable" in sold_out_text:
-                print(f"DEBUG: Confirmed OOS via element matching {sold_out_block_selector} for {url}")
+                print(f"DEBUG: Confirmed OOS via element {sold_out_block_selector} for {url}")
                 return False
+        else:
+            print(f"DEBUG: Element for OOS selector {sold_out_block_selector} NOT FOUND for {url}.")
 
-        # 2. Look for the specific purchase button(s) identified.
-        # Focusing on "shippingButton" as requested.
-        # Ensure this selector corresponds to a button that, when active (not disabled),
-        # truly means the item is available for purchase and shipping.
+
+        # 2. Look for the specific purchase button(s) identified from the printed HTML.
+        # !!! USER ACTION: Update these selectors based on the HTML printed above !!!
         purchase_button_selectors = [
-            {"data-test": "shippingButton"},
-            # {"data-test": "addToCartButton"},  # Keep others commented for this focused test
-            # {"data-test": "pickUpButton"},
-            # {"data-test": "scheduledPickupButton"}
+            {"data-test": "shippingButton"}, # This was reported NOT FOUND before
+            {"data-test": "addToCartButton"}, # This also likely needs verification
+            {"data-test": "pickUpButton"}
         ]
 
         button_found_and_active = False
@@ -73,28 +79,14 @@ def is_in_stock(url):
         if button_found_and_active:
             return True
         
-        # If the specific button wasn't found or wasn't active:
-        # Check if there's a main "Add to Cart" button as a fallback (verify its data-test attribute)
-        # This is an example, you'd need to find the correct data-test for Target's main add to cart button
-        main_add_to_cart_selector = {"data-test": "addToCartButton"} # Or whatever it truly is
-        main_add_to_cart_button = soup.find("button", attrs=main_add_to_cart_selector)
-        if main_add_to_cart_button:
-            selector_str = ", ".join([f"{k}='{v}'" for k, v in main_add_to_cart_selector.items()])
-            print(f"DEBUG: Found fallback button with selector {{{selector_str}}} for {url}.")
-            if 'disabled' not in main_add_to_cart_button.attrs:
-                print(f"DEBUG: Fallback button {{{selector_str}}} is ACTIVE. Item IN STOCK.")
-                return True
-            else:
-                print(f"DEBUG: Fallback button {{{selector_str}}} is DISABLED.")
-
-
+        # Fallback checks (less critical if the above specific selectors are correct)
         page_text_lower = soup.get_text().lower()
         oos_keywords = ["out of stock", "currently unavailable", "sold out", "not available for shipping"]
         if any(keyword in page_text_lower for keyword in oos_keywords):
             print(f"DEBUG: General OOS keyword found in page text and no active buy button for {url}")
             return False
             
-        print(f"DEBUG: No active primary purchase button (e.g., shippingButton) found and no definitive OOS indicators for {url}. Assuming OOS to be safe.")
+        print(f"DEBUG: No active primary purchase button found and no definitive OOS indicators for {url}. Assuming OOS to be safe.")
         return False
 
     except requests.exceptions.RequestException as e:
@@ -103,7 +95,6 @@ def is_in_stock(url):
     except Exception as e:
         print(f"An unexpected error occurred while checking {url}: {e}")
         return False
-
 def send_discord_alert(product_name, url):
     if not DISCORD_WEBHOOK_URL:
         print("🚨 DISCORD_WEBHOOK_URL is not set. Cannot send alert.")
