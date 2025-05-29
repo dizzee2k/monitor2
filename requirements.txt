@@ -1,2 +1,1 @@
-echo "requests" > requirements.txt
-echo "beautifulsoup4" >> requirements.txt
+requests
