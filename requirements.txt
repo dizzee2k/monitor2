@@ -1,2 +1,2 @@
-requests
-beautifulsoup4
+echo "requests" > requirements.txt
+echo "beautifulsoup4" >> requirements.txt
