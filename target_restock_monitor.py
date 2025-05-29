@@ -131,36 +131,72 @@ def is_in_stock(url):
                 print(f"DEBUG: Could not parse street_date: {street_date_str} for {tcin}")
 
         # Check overall product purchasability
-        if product_data_from_json.get("purchasable") is False:
-            print(f"DEBUG: Item {tcin} 'purchasable' flag is False in JSON. Marking as OOS for shipping.")
+        is_purchasable = product_data_from_json.get("purchasable", False) # Default to False if not present
+        if not is_purchasable: # If explicitly False or not present (defaulted to False)
+            print(f"DEBUG: Item {tcin} 'purchasable' flag is '{is_purchasable}' in JSON. Marking as OOS for shipping.")
             return False
 
-        # Focus ONLY on shipping availability
-        shipping_options_data = {}
-        if "fulfillment" in product_data_from_json and isinstance(product_data_from_json["fulfillment"], dict):
-            shipping_options_data = product_data_from_json["fulfillment"].get("shipping_options", {})
-        elif "item" in product_data_from_json and \
-             "fulfillment" in product_data_from_json["item"] and \
-             isinstance(product_data_from_json["item"]["fulfillment"], dict):
-            shipping_options_data = product_data_from_json["item"]["fulfillment"].get("shipping_options", {})
+        # Attempt to get shipping options data more robustly
+        shipping_options_data = {} # Default to empty dict
         
-        # print(f"DEBUG: For TCIN {tcin} - Raw shipping_options_data: {shipping_options_data}") # Can be verbose
+        # Path 1: product.fulfillment.shipping_options
+        fulfillment_level1 = product_data_from_json.get("fulfillment")
+        if isinstance(fulfillment_level1, dict):
+            shipping_options_level1 = fulfillment_level1.get("shipping_options")
+            if isinstance(shipping_options_level1, dict):
+                shipping_options_data = shipping_options_level1
+                print(f"DEBUG: Found shipping_options_data at product.fulfillment.shipping_options")
+
+        # Path 2: product.item.fulfillment.shipping_options (if not found in path 1 or if path 1 was not dict)
+        if not shipping_options_data: # Only check if not already found
+            item_data = product_data_from_json.get("item")
+            if isinstance(item_data, dict):
+                fulfillment_level2 = item_data.get("fulfillment")
+                if isinstance(fulfillment_level2, dict):
+                    shipping_options_level2 = fulfillment_level2.get("shipping_options")
+                    if isinstance(shipping_options_level2, dict):
+                        shipping_options_data = shipping_options_level2
+                        print(f"DEBUG: Found shipping_options_data at product.item.fulfillment.shipping_options")
+        
+        if not shipping_options_data: # If still not found or not a dict
+             print(f"DEBUG: shipping_options not found at expected primary paths or not a dict.")
+             # Fallback: Check general ship_to_guest eligibility if no specific shipping_options found
+             ship_to_guest_eligible = product_data_from_json.get("item", {}).get("eligibility_rules", {}).get("ship_to_guest", {}).get("is_active", False)
+             if ship_to_guest_eligible and is_purchasable:
+                 print(f"DEBUG: No specific shipping_options, but ship_to_guest_eligible and purchasable are True. Marking as IN STOCK (heuristic).")
+                 return True
+             else:
+                 print(f"DEBUG: No specific shipping_options, and ship_to_guest_eligible ({ship_to_guest_eligible}) or purchasable ({is_purchasable}) is false. Marking as OOS.")
+                 return False
+
 
         specific_shipping_status = str(shipping_options_data.get("availability_status", "UNKNOWN")).upper()
         shipping_order_limit = shipping_options_data.get("order_limit", -1) 
 
-        print(f"DEBUG: For TCIN {tcin} - Parsed Specific Shipping Status: '{specific_shipping_status}', Shipping Order Limit: {shipping_order_limit}")
+        print(f"DEBUG: For TCIN {tcin} - Specific Shipping Status: '{specific_shipping_status}', Shipping Order Limit: {shipping_order_limit}")
 
-        # Stricter condition: Only "IN_STOCK" or "PREORDER_SELLABLE" for specific shipping status counts.
+        # Primary condition for being IN STOCK for shipping:
         if specific_shipping_status == "IN_STOCK" or specific_shipping_status == "PREORDER_SELLABLE":
-            if shipping_order_limit == 0: # If limit is explicitly 0, it's not actually buyable.
+            if shipping_order_limit == 0: 
                 print(f"DEBUG: Item {tcin} specific shipping_status is '{specific_shipping_status}' but shipping_order_limit is 0. Marking as OOS for shipping.")
                 return False
             print(f"DEBUG: Item {tcin} specific shipping_status is '{specific_shipping_status}'. Marking as IN STOCK for shipping.")
             return True
         
-        # If specific_shipping_status is anything else (e.g., "UNKNOWN", "OUT_OF_STOCK", empty), consider it OOS for shipping.
-        print(f"DEBUG: Item {tcin} specific shipping_status is '{specific_shipping_status}' (not IN_STOCK/PREORDER_SELLABLE). Marking as OOS for shipping.")
+        # If specific status is UNKNOWN, also check general eligibility as a fallback, but only if purchasable
+        # This helps with items like Lego where specific status might be UNKNOWN but it's actually shippable
+        ship_to_guest_eligible = product_data_from_json.get("item", {}).get("eligibility_rules", {}).get("ship_to_guest", {}).get("is_active", False)
+        if specific_shipping_status == "UNKNOWN" and ship_to_guest_eligible and is_purchasable:
+            # Additional check: Ensure there isn't an explicit "OUT_OF_STOCK" in a broader fulfillment status if available
+            # This is a heuristic and might need adjustment based on more examples
+            overall_fulfillment_status = product_data_from_json.get("fulfillment", {}).get("availability_status", "").upper()
+            if overall_fulfillment_status == "OUT_OF_STOCK":
+                 print(f"DEBUG: Item {tcin} specific shipping is UNKNOWN, but overall fulfillment is OUT_OF_STOCK. Marking as OOS.")
+                 return False
+            print(f"DEBUG: Item {tcin} specific shipping_status is 'UNKNOWN', but ship_to_guest_eligible and purchasable are True. Marking as IN STOCK for shipping (heuristic).")
+            return True
+
+        print(f"DEBUG: Item {tcin} (shipping_status: '{specific_shipping_status}') does not meet IN STOCK criteria for shipping. Marking as OOS.")
         return False
 
     except requests.exceptions.RequestException as e:
