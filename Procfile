@@ -1,1 +1,1 @@
-worker: python restock_bot.py
+worker: python target_restock_bot.py
