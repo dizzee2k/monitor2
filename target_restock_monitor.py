@@ -165,8 +165,8 @@ def is_in_stock(url):
 
         # --- Decision Logic ---
         # 1. If explicitly not purchasable at top level, it's OOS.
-        if is_generally_purchasable_val is False:
-            print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' is False. Marking OOS.")
+        if is_generally_purchasable_val is False: # Note: This is "is False", not "is not True"
+            print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' is explicitly False. Marking OOS.")
             return False
 
         # 2. Primary Condition: Explicitly IN_STOCK or PREORDER_SELLABLE from specific shipping_options
@@ -174,24 +174,23 @@ def is_in_stock(url):
             if shipping_order_limit == 0: 
                 print(f"DEBUG: TCIN {tcin} - Specific shipping '{specific_shipping_status}' but limit 0. Marking OOS.")
                 return False
-            # No need to check is_generally_purchasable_val again if it passed the first check or was None/True
+            # If purchasable is None, we assume it's okay if specific status is good.
+            # If purchasable is False, it would have been caught above.
             print(f"DEBUG: TCIN {tcin} - Specific shipping '{specific_shipping_status}'. Marking IN STOCK.")
             return True
         
-        # 3. If specific shipping status is explicitly OUT_OF_STOCK or known negative terms
+        # 3. If specific shipping status is explicitly OUT_OF_STOCK or other known negative terms
         if specific_shipping_status in ["OUT_OF_STOCK", "UNAVAILABLE", "NOT_SOLD_ONLINE", "NOT_AVAILABLE"]:
             print(f"DEBUG: TCIN {tcin} - Specific shipping status is '{specific_shipping_status}'. Marking OOS.")
             return False
 
         # 4. Heuristic Fallback for "UNKNOWN" or "NOT_FOUND" specific status:
-        #    Check general shippability if the item isn't explicitly marked unpurchasable.
         if specific_shipping_status in ["UNKNOWN", "NOT_FOUND"]:
-            # If is_generally_purchasable_val is None, we treat it as potentially purchasable for this heuristic.
-            # It must be generally shippable via one of the broader flags.
+            # For this heuristic to pass, the item should be generally purchasable (True or None)
+            # AND eligible for online channels OR general guest shipping.
             if (is_generally_purchasable_val is True or is_generally_purchasable_val is None) and \
                (is_online_eligible_from_channels or ship_to_guest_eligible_from_rules):
                 
-                # Additional check: if there's an overall fulfillment status that explicitly says out_of_stock, honor that.
                 overall_fulfillment_status = ""
                 if isinstance(product_data_from_json.get("fulfillment"), dict):
                     overall_fulfillment_status = product_data_from_json.get("fulfillment", {}).get("availability_status", "").upper()
@@ -206,7 +205,6 @@ def is_in_stock(url):
                 print(f"DEBUG: TCIN {tcin} - Heuristic failed for UNKNOWN/NOT_FOUND. Purchasable: {is_generally_purchasable_val}, OnlineEligible: {is_online_eligible_from_channels}, ShipToGuestRule: {ship_to_guest_eligible_from_rules}. Marking OOS.")
                 return False
         
-        # Default: If none of the above conditions met, consider it OOS.
         print(f"DEBUG: TCIN {tcin} - Fell through all checks. SpecificShippingStatus: '{specific_shipping_status}'. Marking OOS.")
         return False
 
