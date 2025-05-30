@@ -118,7 +118,7 @@ def is_in_stock(url):
             print(f"DEBUG: Product data for TCIN {tcin} not found in __TGT_DATA__ JSON for {url}. Marking as OOS.")
             return False
 
-        # --- Start of revised stock checking logic ---
+        # --- Start of revised stock checking logic (v14) ---
         
         # 1. Pre-order Check
         street_date_str = product_data_from_json.get("item", {}).get("mmbv_content", {}).get("street_date")
@@ -132,14 +132,9 @@ def is_in_stock(url):
             except ValueError:
                 print(f"DEBUG: TCIN {tcin} - Could not parse street_date: {street_date_str}")
 
-        # 2. Overall Purchasability (Top-level)
-        is_generally_purchasable_val = product_data_from_json.get("purchasable") # Can be True, False, or None
-        print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' flag: {is_generally_purchasable_val}")
-        if is_generally_purchasable_val is False: # Explicitly False is a strong OOS signal
-            print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' is False. Marking OOS.")
-            return False
-
-        # 3. Purchasing Channel Eligibility for "ONLINE"
+        # 2. Extract Key Data Points
+        is_product_purchasable = product_data_from_json.get("purchasable") # Can be True, False, or None
+        
         online_channel_eligible = False
         online_channel_reason = "UNKNOWN"
         purchasing_channels = product_data_from_json.get("item", {}).get("fulfillment", {}).get("purchasing_channel_eligibility", [])
@@ -147,43 +142,35 @@ def is_in_stock(url):
             if isinstance(channel_info, dict) and channel_info.get("channel") == "ONLINE":
                 online_channel_eligible = channel_info.get("is_eligible", False)
                 online_channel_reason = str(channel_info.get("reason", "UNKNOWN")).upper()
-                break # Found the ONLINE channel info
-
-        # 4. Specific Shipping Options (availability_status and order_limit)
-        shipping_options_data = {}
-        item_fulfillment = product_data_from_json.get("item", {}).get("fulfillment", {})
-        if isinstance(item_fulfillment, dict):
-            shipping_options_data = item_fulfillment.get("shipping_options", {})
-        if not shipping_options_data or not isinstance(shipping_options_data, dict): # Fallback
-            root_fulfillment = product_data_from_json.get("fulfillment", {})
-            if isinstance(root_fulfillment, dict):
-                shipping_options_data = root_fulfillment.get("shipping_options", {})
-        if not isinstance(shipping_options_data, dict): shipping_options_data = {}
-
-        specific_shipping_availability_status = str(shipping_options_data.get("availability_status", "NOT_FOUND")).upper()
-        shipping_order_limit = shipping_options_data.get("order_limit", -1)
+                break
         
-        print(f"DEBUG: TCIN {tcin} - OnlineChannelEligible: {online_channel_eligible}, OnlineChannelReason: '{online_channel_reason}', SpecificShippingStatus: '{specific_shipping_availability_status}', ShipLimit: {shipping_order_limit}")
+        shipping_options_data = product_data_from_json.get("item", {}).get("fulfillment", {}).get("shipping_options", {})
+        if not isinstance(shipping_options_data, dict): shipping_options_data = {} # Ensure it's a dict
+        shipping_order_limit = shipping_options_data.get("order_limit", -1)
+        # specific_shipping_availability_status = str(shipping_options_data.get("availability_status", "NOT_FOUND")).upper()
 
-        # --- Decision Logic ---
-        # If ONLINE channel is explicitly eligible AND its reason indicates availability
-        if online_channel_eligible and online_channel_reason in ["AVAILABLE", "IN_STOCK", "PREORDER_SELLABLE"]:
-            if shipping_order_limit == 0: # Check order limit from shipping_options if available
-                 print(f"DEBUG: TCIN {tcin} - Online channel eligible ('{online_channel_reason}') but shipping_order_limit is 0. Marking OOS.")
-                 return False
-            print(f"DEBUG: TCIN {tcin} - Online channel eligible and reason is '{online_channel_reason}'. Marking IN STOCK.")
-            return True
 
-        # If specific shipping status is explicitly IN_STOCK or PREORDER_SELLABLE (even if online_channel_reason was different)
-        if specific_shipping_availability_status == "IN_STOCK" or specific_shipping_availability_status == "PREORDER_SELLABLE":
+        print(f"DEBUG: TCIN {tcin} - ProductPurchasable: {is_product_purchasable}, OnlineChannelEligible: {online_channel_eligible}, OnlineChannelReason: '{online_channel_reason}', ShipLimit: {shipping_order_limit}")
+
+        # 3. Primary OOS Check based on 'purchasable' flag
+        if is_product_purchasable is False:
+            print(f"DEBUG: TCIN {tcin} - 'product.purchasable' is False. Marking OOS.")
+            return False
+
+        # 4. Primary IN_STOCK Check based on ONLINE channel eligibility and reason
+        #    Acceptable reasons for IN_STOCK (case-insensitive)
+        positive_online_reasons = ["AVAILABLE", "IN_STOCK", "PREORDER_SELLABLE", "AVAILABLE_FOR_SHIPPING"]
+        if online_channel_eligible and online_channel_reason in positive_online_reasons:
             if shipping_order_limit == 0:
-                print(f"DEBUG: TCIN {tcin} - Specific shipping '{specific_shipping_availability_status}' but limit 0. Marking OOS.")
-                return False
-            print(f"DEBUG: TCIN {tcin} - Specific shipping status is '{specific_shipping_availability_status}'. Marking IN STOCK.")
+                 print(f"DEBUG: TCIN {tcin} - Online channel OK ('{online_channel_reason}') but shipping_order_limit is 0. Marking OOS.")
+                 return False
+            print(f"DEBUG: TCIN {tcin} - Online channel eligible and reason '{online_channel_reason}' is positive. Marking IN STOCK.")
             return True
-            
-        # Default to OOS if neither of the above strong IN_STOCK conditions are met
-        print(f"DEBUG: TCIN {tcin} - No definitive IN_STOCK signals. OnlineChannelEligible: {online_channel_eligible} (Reason: '{online_channel_reason}'), SpecificShippingStatus: '{specific_shipping_availability_status}'. Marking OOS.")
+        
+        # If we reach here, the item is not explicitly unpurchasable,
+        # but the ONLINE channel eligibility wasn't a clear "IN_STOCK" signal.
+        # We will consider it OOS to be conservative and avoid false positives from ambiguous states.
+        print(f"DEBUG: TCIN {tcin} - Not explicitly unpurchasable, but ONLINE channel (Eligible: {online_channel_eligible}, Reason: '{online_channel_reason}') not definitively IN_STOCK. Marking OOS.")
         return False
 
     except requests.exceptions.RequestException as e:
