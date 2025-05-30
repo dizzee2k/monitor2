@@ -132,9 +132,7 @@ def is_in_stock(url):
 
         # General purchasability flag
         is_generally_purchasable_val = product_data_from_json.get("purchasable") 
-        print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' flag: {is_generally_purchasable_val}")
-
-        # Extract specific shipping options data
+        
         shipping_options_data = {}
         item_fulfillment = product_data_from_json.get("item", {}).get("fulfillment", {})
         if isinstance(item_fulfillment, dict):
@@ -151,7 +149,6 @@ def is_in_stock(url):
         specific_shipping_status = str(shipping_options_data.get("availability_status", "NOT_FOUND")).upper()
         shipping_order_limit = shipping_options_data.get("order_limit", -1)
         
-        # General shippability flags (defined before use in print statements)
         is_online_eligible_from_channels = False
         purchasing_channels = product_data_from_json.get("item", {}).get("fulfillment", {}).get("purchasing_channel_eligibility", [])
         for channel_info in purchasing_channels:
@@ -165,8 +162,8 @@ def is_in_stock(url):
 
         # --- Decision Logic ---
         # 1. If explicitly not purchasable at top level, it's OOS.
-        if is_generally_purchasable_val is False: # Note: This is "is False", not "is not True"
-            print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' is explicitly False. Marking OOS.")
+        if is_generally_purchasable_val is False: # Must be explicitly False
+            print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' is False. Marking OOS.")
             return False
 
         # 2. Primary Condition: Explicitly IN_STOCK or PREORDER_SELLABLE from specific shipping_options
@@ -174,8 +171,6 @@ def is_in_stock(url):
             if shipping_order_limit == 0: 
                 print(f"DEBUG: TCIN {tcin} - Specific shipping '{specific_shipping_status}' but limit 0. Marking OOS.")
                 return False
-            # If purchasable is None, we assume it's okay if specific status is good.
-            # If purchasable is False, it would have been caught above.
             print(f"DEBUG: TCIN {tcin} - Specific shipping '{specific_shipping_status}'. Marking IN STOCK.")
             return True
         
@@ -184,11 +179,11 @@ def is_in_stock(url):
             print(f"DEBUG: TCIN {tcin} - Specific shipping status is '{specific_shipping_status}'. Marking OOS.")
             return False
 
-        # 4. Heuristic Fallback for "UNKNOWN" or "NOT_FOUND" specific status:
+        # 4. Heuristic for "UNKNOWN" or "NOT_FOUND" specific status:
+        #    Only apply if item is explicitly True for purchasable
+        #    AND it's generally shippable by one of the broader rules.
         if specific_shipping_status in ["UNKNOWN", "NOT_FOUND"]:
-            # For this heuristic to pass, the item should be generally purchasable (True or None)
-            # AND eligible for online channels OR general guest shipping.
-            if (is_generally_purchasable_val is True or is_generally_purchasable_val is None) and \
+            if is_generally_purchasable_val is True and \
                (is_online_eligible_from_channels or ship_to_guest_eligible_from_rules):
                 
                 overall_fulfillment_status = ""
@@ -199,9 +194,9 @@ def is_in_stock(url):
                      print(f"DEBUG: TCIN {tcin} - Heuristic: Specific shipping UNKNOWN/NOT_FOUND, but overall fulfillment is OUT_OF_STOCK. Marking OOS.")
                      return False
 
-                print(f"DEBUG: TCIN {tcin} - Heuristic: Specific shipping UNKNOWN/NOT_FOUND, but general flags suggest shippable. Marking IN STOCK.")
+                print(f"DEBUG: TCIN {tcin} - Heuristic: Specific shipping UNKNOWN/NOT_FOUND, AND Purchasable (True) AND (OnlineEligible OR ShipToGuestRule) are True. Marking IN STOCK.")
                 return True
-            else:
+            else: 
                 print(f"DEBUG: TCIN {tcin} - Heuristic failed for UNKNOWN/NOT_FOUND. Purchasable: {is_generally_purchasable_val}, OnlineEligible: {is_online_eligible_from_channels}, ShipToGuestRule: {ship_to_guest_eligible_from_rules}. Marking OOS.")
                 return False
         
