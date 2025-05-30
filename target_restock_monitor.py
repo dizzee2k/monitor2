@@ -118,7 +118,9 @@ def is_in_stock(url):
             print(f"DEBUG: Product data for TCIN {tcin} not found in __TGT_DATA__ JSON for {url}. Marking as OOS.")
             return False
 
-        # Check for pre-order street date
+        # --- Start of revised stock checking logic ---
+        
+        # 1. Pre-order Check
         street_date_str = product_data_from_json.get("item", {}).get("mmbv_content", {}).get("street_date")
         if street_date_str:
             try:
@@ -130,77 +132,58 @@ def is_in_stock(url):
             except ValueError:
                 print(f"DEBUG: TCIN {tcin} - Could not parse street_date: {street_date_str}")
 
-        # General purchasability flag
-        is_generally_purchasable_val = product_data_from_json.get("purchasable") 
-        
+        # 2. Overall Purchasability (Top-level)
+        is_generally_purchasable_val = product_data_from_json.get("purchasable") # Can be True, False, or None
+        print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' flag: {is_generally_purchasable_val}")
+        if is_generally_purchasable_val is False: # Explicitly False is a strong OOS signal
+            print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' is False. Marking OOS.")
+            return False
+
+        # 3. Purchasing Channel Eligibility for "ONLINE"
+        online_channel_eligible = False
+        online_channel_reason = "UNKNOWN"
+        purchasing_channels = product_data_from_json.get("item", {}).get("fulfillment", {}).get("purchasing_channel_eligibility", [])
+        for channel_info in purchasing_channels:
+            if isinstance(channel_info, dict) and channel_info.get("channel") == "ONLINE":
+                online_channel_eligible = channel_info.get("is_eligible", False)
+                online_channel_reason = str(channel_info.get("reason", "UNKNOWN")).upper()
+                break # Found the ONLINE channel info
+
+        # 4. Specific Shipping Options (availability_status and order_limit)
         shipping_options_data = {}
         item_fulfillment = product_data_from_json.get("item", {}).get("fulfillment", {})
         if isinstance(item_fulfillment, dict):
             shipping_options_data = item_fulfillment.get("shipping_options", {})
-        
-        if not shipping_options_data or not isinstance(shipping_options_data, dict):
+        if not shipping_options_data or not isinstance(shipping_options_data, dict): # Fallback
             root_fulfillment = product_data_from_json.get("fulfillment", {})
             if isinstance(root_fulfillment, dict):
                 shipping_options_data = root_fulfillment.get("shipping_options", {})
-        
-        if not isinstance(shipping_options_data, dict):
-            shipping_options_data = {}
+        if not isinstance(shipping_options_data, dict): shipping_options_data = {}
 
-        specific_shipping_status = str(shipping_options_data.get("availability_status", "NOT_FOUND")).upper()
+        specific_shipping_availability_status = str(shipping_options_data.get("availability_status", "NOT_FOUND")).upper()
         shipping_order_limit = shipping_options_data.get("order_limit", -1)
         
-        is_online_eligible_from_channels = False
-        purchasing_channels = product_data_from_json.get("item", {}).get("fulfillment", {}).get("purchasing_channel_eligibility", [])
-        for channel_info in purchasing_channels:
-            if isinstance(channel_info, dict) and channel_info.get("channel") == "ONLINE" and channel_info.get("is_eligible") is True:
-                is_online_eligible_from_channels = True
-                break
-        
-        ship_to_guest_eligible_from_rules = product_data_from_json.get("item", {}).get("eligibility_rules", {}).get("ship_to_guest", {}).get("is_active", False)
-
-        print(f"DEBUG: TCIN {tcin} - SpecificShippingStatus: '{specific_shipping_status}', ShipLimit: {shipping_order_limit}, GenerallyPurchasable: {is_generally_purchasable_val}, OnlineChannelEligible: {is_online_eligible_from_channels}, ShipToGuestRule: {ship_to_guest_eligible_from_rules}")
+        print(f"DEBUG: TCIN {tcin} - OnlineChannelEligible: {online_channel_eligible}, OnlineChannelReason: '{online_channel_reason}', SpecificShippingStatus: '{specific_shipping_availability_status}', ShipLimit: {shipping_order_limit}")
 
         # --- Decision Logic ---
-        # 1. If explicitly not purchasable at top level, it's OOS.
-        if is_generally_purchasable_val is False: # Must be explicitly False
-            print(f"DEBUG: TCIN {tcin} - Top-level 'purchasable' is False. Marking OOS.")
-            return False
-
-        # 2. Primary Condition: Explicitly IN_STOCK or PREORDER_SELLABLE from specific shipping_options
-        if specific_shipping_status == "IN_STOCK" or specific_shipping_status == "PREORDER_SELLABLE":
-            if shipping_order_limit == 0: 
-                print(f"DEBUG: TCIN {tcin} - Specific shipping '{specific_shipping_status}' but limit 0. Marking OOS.")
-                return False
-            print(f"DEBUG: TCIN {tcin} - Specific shipping '{specific_shipping_status}'. Marking IN STOCK.")
+        # If ONLINE channel is explicitly eligible AND its reason indicates availability
+        if online_channel_eligible and online_channel_reason in ["AVAILABLE", "IN_STOCK", "PREORDER_SELLABLE"]:
+            if shipping_order_limit == 0: # Check order limit from shipping_options if available
+                 print(f"DEBUG: TCIN {tcin} - Online channel eligible ('{online_channel_reason}') but shipping_order_limit is 0. Marking OOS.")
+                 return False
+            print(f"DEBUG: TCIN {tcin} - Online channel eligible and reason is '{online_channel_reason}'. Marking IN STOCK.")
             return True
-        
-        # 3. If specific shipping status is explicitly OUT_OF_STOCK or other known negative terms
-        if specific_shipping_status in ["OUT_OF_STOCK", "UNAVAILABLE", "NOT_SOLD_ONLINE", "NOT_AVAILABLE"]:
-            print(f"DEBUG: TCIN {tcin} - Specific shipping status is '{specific_shipping_status}'. Marking OOS.")
-            return False
 
-        # 4. Heuristic for "UNKNOWN" or "NOT_FOUND" specific status:
-        #    Only apply if item is explicitly True for purchasable
-        #    AND it's generally shippable by one of the broader rules.
-        if specific_shipping_status in ["UNKNOWN", "NOT_FOUND"]:
-            if is_generally_purchasable_val is True and \
-               (is_online_eligible_from_channels or ship_to_guest_eligible_from_rules):
-                
-                overall_fulfillment_status = ""
-                if isinstance(product_data_from_json.get("fulfillment"), dict):
-                    overall_fulfillment_status = product_data_from_json.get("fulfillment", {}).get("availability_status", "").upper()
-                
-                if overall_fulfillment_status == "OUT_OF_STOCK":
-                     print(f"DEBUG: TCIN {tcin} - Heuristic: Specific shipping UNKNOWN/NOT_FOUND, but overall fulfillment is OUT_OF_STOCK. Marking OOS.")
-                     return False
-
-                print(f"DEBUG: TCIN {tcin} - Heuristic: Specific shipping UNKNOWN/NOT_FOUND, AND Purchasable (True) AND (OnlineEligible OR ShipToGuestRule) are True. Marking IN STOCK.")
-                return True
-            else: 
-                print(f"DEBUG: TCIN {tcin} - Heuristic failed for UNKNOWN/NOT_FOUND. Purchasable: {is_generally_purchasable_val}, OnlineEligible: {is_online_eligible_from_channels}, ShipToGuestRule: {ship_to_guest_eligible_from_rules}. Marking OOS.")
+        # If specific shipping status is explicitly IN_STOCK or PREORDER_SELLABLE (even if online_channel_reason was different)
+        if specific_shipping_availability_status == "IN_STOCK" or specific_shipping_availability_status == "PREORDER_SELLABLE":
+            if shipping_order_limit == 0:
+                print(f"DEBUG: TCIN {tcin} - Specific shipping '{specific_shipping_availability_status}' but limit 0. Marking OOS.")
                 return False
-        
-        print(f"DEBUG: TCIN {tcin} - Fell through all checks. SpecificShippingStatus: '{specific_shipping_status}'. Marking OOS.")
+            print(f"DEBUG: TCIN {tcin} - Specific shipping status is '{specific_shipping_availability_status}'. Marking IN STOCK.")
+            return True
+            
+        # Default to OOS if neither of the above strong IN_STOCK conditions are met
+        print(f"DEBUG: TCIN {tcin} - No definitive IN_STOCK signals. OnlineChannelEligible: {online_channel_eligible} (Reason: '{online_channel_reason}'), SpecificShippingStatus: '{specific_shipping_availability_status}'. Marking OOS.")
         return False
 
     except requests.exceptions.RequestException as e:
